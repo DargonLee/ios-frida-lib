@@ -16,6 +16,7 @@ function UUHelp() {
 	console.log('    Example usage: UUSearchClassAllMethods("VssCtrlSDK")')
 	console.log('    Example usage: UUSearchClassesAllMethods(["VssCtrlSDK","VssClipboardManager"])')
 	console.log('    Example usage: UUSearchClassesMethods(["VssCtrlSDK","VssClipboardManager"],["some methods"])')
+	console.log('    Example usage: UUTrace("+[UULoadManger delayHandleMethod]");')
 }
 
 // UUIntercept - Begin
@@ -40,7 +41,7 @@ function _interceptAuto(target) {
 	var methodType = target.match(/^([-+])/)[1];
 	var methodName = target.match(/^[-+]\[.*\s(.*)\]/)[1];
 	var argCount = (methodName.match(/:/g) || []).length;
-	console.log(colors.green, "\n[*] Info: trying to intercept.... ", target ,colors.resetColor);
+	console.log(colors.green, "\n[*] Info: trying to intercept.... ", target, colors.resetColor);
 	var oldImpl = ObjC.classes[className][methodType + " " + methodName];
 	Interceptor.attach(oldImpl.implementation, {
 
@@ -50,7 +51,7 @@ function _interceptAuto(target) {
 				_interceptPrintType("[-] arg " + (i + 1) + " type:\t", args[i + 2]);
 				_interceptPrintValue("[-] arg " + (i + 1) + " value:\t", args[i + 2]);
 			}
-			console.log(colors.yellow, "\n[+]Backtrace.... ", target ,colors.resetColor);
+			console.log(colors.yellow, "\n[+]Backtrace.... ", target, colors.resetColor);
 			console.log(Thread.backtrace(this.context, Backtracer.ACCURATE).map(DebugSymbol.fromAddress).join("\n"));
 		},
 
@@ -126,6 +127,74 @@ function infoLookup(key) {
 	return null;
 }
 
+function UUAppStoreReceipt() {
+	if (ObjC.available && "NSBundle" in ObjC.classes) {
+		var info = ObjC.classes.NSBundle.mainBundle().appStoreReceiptURL();
+		console.log(info.path());
+
+		var data = ObjC.classes.NSData.dataWithContentsOfURL_(info);
+		var fileExists = ObjC.classes.NSFileManager.defaultManager().fileExistsAtPath_(info.path());
+
+		var dataResult = 'have data';
+		var fileResult = 'file exists';
+
+		if (data === null) {
+			dataResult = 'null data';
+		}
+		if (fileExists === false) {
+    		fileResult = "file not exists ";
+		}		
+		return fileResult  + 'and ' + dataResult;
+
+		var string = data.base64EncodedStringWithOptions_(0);
+		return string;
+	}
+}
+
+function UULSApplicationWorkspace() {
+
+	// 获取 LSApplicationWorkspace 类
+	var LSApplicationWorkspace = ObjC.classes.LSApplicationWorkspace;
+
+	// 获取 defaultWorkspace 方法并调用
+	var workspace = LSApplicationWorkspace.defaultWorkspace();
+
+	// 获取 installedPlugins 方法并调用
+	var installedPlugins = workspace.installedPlugins();
+
+	var pluginsCount = installedPlugins.count();
+
+	console.log("installedPlugins:" + pluginsCount);
+
+	// 遍历返回的数组
+	for (var i = 0; i < pluginsCount; i++) {
+		// 获取 LSPlugInKitProxy 对象
+		var plugin = installedPlugins.objectAtIndex_(i);
+		// 获取 containingBundle 方法并调用
+		var containingBundle = plugin.containingBundle();
+		if (containingBundle === null) { continue; }
+		var bundleIdentifier = containingBundle.bundleIdentifier();
+		if (bundleIdentifier.containsString_("com.apple")) { continue; }
+		console.log("===========================>");
+		console.log("bundleIdentifier ->", bundleIdentifier);
+		console.log("applicationDSID ->", containingBundle.applicationDSID());
+		console.log("applicationIdentifier ->", containingBundle.applicationIdentifier());
+		console.log("applicationType ->", containingBundle.applicationType());
+		console.log("dynamicDiskUsage ->", containingBundle.dynamicDiskUsage());
+		console.log("itemID ->", containingBundle.itemID());
+		console.log("itemName ->", containingBundle.itemName());
+		console.log("minimumSystemVersion ->", containingBundle.minimumSystemVersion());
+		console.log("requiredDeviceCapabilities ->", containingBundle.requiredDeviceCapabilities());
+		console.log("sdkVersion ->", containingBundle.sdkVersion());
+		console.log("shortVersionString ->", containingBundle.shortVersionString());
+		console.log("sourceAppIdentifier ->", containingBundle.sourceAppIdentifier());
+		console.log("staticDiskUsage ->", containingBundle.staticDiskUsage());
+		console.log("teamID ->", containingBundle.teamID());
+		console.log("vendorName ->", containingBundle.vendorName());
+	}
+
+}
+
 function UUAppInfo() {
 	var output = {};
 	output["Name"] = infoLookup("CFBundleName");
@@ -138,9 +207,17 @@ function UUAppInfo() {
 }
 // UUAppInfo - End
 
+function UUAPPGropuPath(groupId) {
+	var url = ObjC.classes.NSFileManager.defaultManager().containerURLForSecurityApplicationGroupIdentifier_("group.com.jnit.ngpt");
+	var path = ObjC.Object(url).absoluteString();
+	return {
+		"GroupID": path
+	}
+}
+
 
 // UUSearchClass -Begin
-function search_methods(className,search_method) {
+function search_methods(className, search_method) {
 	var methods_found = [];
 	var methods = ObjC.classes[className].$ownMethods;
 	if (Array.isArray(search_method) && search_method.length) { //search_method not empty
@@ -199,12 +276,14 @@ function print_arguments(args) {
 }
 
 function UUSearchClassAllMethods(searchClasse) {
-	UUSearchClassesMethods([searchClasse],[])
+	UUSearchClassesMethods([searchClasse], [])
 }
+
 function UUSearchClassesAllMethods(searchClasses) {
-	UUSearchClassesMethods(searchClasses,[])
+	UUSearchClassesMethods(searchClasses, [])
 }
-function UUSearchClassesMethods(searchClasses,searchMethods) {
+
+function UUSearchClassesMethods(searchClasses, searchMethods) {
 	if (ObjC.available) {
 		console.log(colors.green, "\n[*] Started: Hooking.... ", colors.resetColor);
 		var classes_found = search_classes(searchClasses);
@@ -228,7 +307,7 @@ function UUSearchClassesMethods(searchClasses,searchMethods) {
 						console.log(colors.green, "[+] Detected call to: ", colors.resetColor);
 						console.log('   ' + this._className + ' --> ' + this._methodName);
 						console.log(colors.green, "[+] Dump Arugment in method: ", colors.resetColor);
-						// print_arguments(args);
+						print_arguments(args);
 						// console.log(ObjC.Object(args[2]));
 						// var data = new ObjC.Object(args[2]);
 						console.log(colors.green, "[+] Arugment type: ", colors.resetColor);
@@ -263,41 +342,42 @@ function UUSearchClassesMethods(searchClasses,searchMethods) {
 
 // UUFindClass -Begin
 function UUFind_specific_method_in_all_classes(func_name) {
-    console.log("[*] Started: Find Specific Method in All Classes");
-    for (var className in ObjC.classes) {
-        if (ObjC.classes.hasOwnProperty(className)) {
-            //var methods = ObjC.classes[className].$methods;
-            var methods = ObjC.classes[className].$ownMethods;
-            for (var i = 0; i < methods.length; i++) {
-                if (methods[i].includes(func_name)) {
-                    console.log("[+] Class: " + className);
-                    console.log("\t[-] Method: " + methods[i]);
-                    console.log("\t\t[-] Arguments Type: " + ObjC.classes[className][methods[i]].argumentTypes);
-                    console.log("\t\t[-] Return Type: " + ObjC.classes[className][methods[i]].returnType);
-                }
-            }
-        }
-    }
-    console.log("[*] Completed: Find Specific Method in All Classes");
+	console.log("[*] Started: Find Specific Method in All Classes");
+	for (var className in ObjC.classes) {
+		if (ObjC.classes.hasOwnProperty(className)) {
+			//var methods = ObjC.classes[className].$methods;
+			var methods = ObjC.classes[className].$ownMethods;
+			for (var i = 0; i < methods.length; i++) {
+				if (methods[i].includes(func_name)) {
+					console.log("[+] Class: " + className);
+					console.log("\t[-] Method: " + methods[i]);
+					console.log("\t\t[-] Arguments Type: " + ObjC.classes[className][methods[i]].argumentTypes);
+					console.log("\t\t[-] Return Type: " + ObjC.classes[className][methods[i]].returnType);
+				}
+			}
+		}
+	}
+	console.log("[*] Completed: Find Specific Method in All Classes");
 }
+
 function UUFind_all_method_in_classe(class_name) {
-    console.log("[*] Started: Find All Methods of Classe")
-    for (var className in ObjC.classes) {
-        if (className === class_name) {
-            console.warn("[+] Class: " + className);
-            //var methods = ObjC.classes[className].$methods;
-            var methods = ObjC.classes[className].$ownMethods;
-            for (var i = 0; i < methods.length; i++) {
-                console.log(colors.green, "\t[-] Method: ", methods[i], colors.resetColor);
-                try {
-                    console.log("\t\t[-] Arguments Type: " + ObjC.classes[className][methods[i]].argumentTypes);
-                    console.log("\t\t[-] Return Type: " + ObjC.classes[className][methods[i]].returnType);
-                } catch (err) {}
-            }
-            break;
-        }
-    }
-    console.log("[*] Completed: Find Methods of All Classes")
+	console.log("[*] Started: Find All Methods of Classe")
+	for (var className in ObjC.classes) {
+		if (className === class_name) {
+			console.warn("[+] Class: " + className);
+			//var methods = ObjC.classes[className].$methods;
+			var methods = ObjC.classes[className].$ownMethods;
+			for (var i = 0; i < methods.length; i++) {
+				console.log(colors.green, "\t[-] Method: ", methods[i], colors.resetColor);
+				try {
+					console.log("\t\t[-] Arguments Type: " + ObjC.classes[className][methods[i]].argumentTypes);
+					console.log("\t\t[-] Return Type: " + ObjC.classes[className][methods[i]].returnType);
+				} catch (err) {}
+			}
+			break;
+		}
+	}
+	console.log("[*] Completed: Find Methods of All Classes")
 }
 
 // UUFindClass -End
@@ -306,120 +386,180 @@ function UUFind_all_method_in_classe(class_name) {
 
 // UUTrace -Begin
 function UUTrace(pattern) {
-    var type = (pattern.indexOf(" ") === -1) ? "module" : "objc";
-    var res = new ApiResolver(type);
-    var matches = res.enumerateMatchesSync(pattern);
-    var targets = uniqBy(matches, JSON.stringify);
+	var type = (pattern.indexOf(" ") === -1) ? "module" : "objc";
+	var res = new ApiResolver(type);
+	var matches = res.enumerateMatchesSync(pattern);
+	var targets = uniqBy(matches, JSON.stringify);
 
-    targets.forEach(function(target) {
-        if (type === "objc")
-            traceObjC(target.address, target.name);
-        else if (type === "module")
-            traceModule(target.address, target.name);
-    });
+	targets.forEach(function(target) {
+		if (type === "objc")
+			traceObjC(target.address, target.name);
+		else if (type === "module")
+			traceModule(target.address, target.name);
+	});
 }
 
 // remove duplicates from array
 function uniqBy(array, key) {
-    var seen = {};
-    return array.filter(function(item) {
-        var k = key(item);
-        return seen.hasOwnProperty(k) ? false : (seen[k] = true);
-    });
+	var seen = {};
+	return array.filter(function(item) {
+		var k = key(item);
+		return seen.hasOwnProperty(k) ? false : (seen[k] = true);
+	});
 }
 
 // trace ObjC methods
 function traceObjC(impl, name) {
-    console.log("Tracing " + name);
+	console.log("Tracing " + name);
 
-    Interceptor.attach(impl, {
+	Interceptor.attach(impl, {
 
-        onEnter: function(args) {
+		onEnter: function(args) {
 
-            // debug only the intended calls
-            this.flag = 0;
-            // if (ObjC.Object(args[2]).toString() === "1234567890abcdef1234567890abcdef12345678")
-            this.flag = 1;
+			// debug only the intended calls
+			this.flag = 0;
+			// if (ObjC.Object(args[2]).toString() === "1234567890abcdef1234567890abcdef12345678")
+			this.flag = 1;
 
-            if (this.flag) {
-                console.warn("\n*** entered " + name);
+			if (this.flag) {
+				console.warn("\n*** entered " + name);
 
-                // print full backtrace
-                // console.log("\nBacktrace:\n" + Thread.backtrace(this.context, Backtracer.ACCURATE)
-                //      .map(DebugSymbol.fromAddress).join("\n"));
+				// print full backtrace
+				// console.log("\nBacktrace:\n" + Thread.backtrace(this.context, Backtracer.ACCURATE)
+				//      .map(DebugSymbol.fromAddress).join("\n"));
 
-                // print caller
-                console.log("\nCaller: " + DebugSymbol.fromAddress(this.returnAddress));
+				// print caller
+				console.log("\nCaller: " + DebugSymbol.fromAddress(this.returnAddress));
 
-                // print args
-                if (name.indexOf(":") !== -1) {
-                    console.log();
-                    var par = name.split(":");
-                    par[0] = par[0].split(" ")[1];
-                    for (var i = 0; i < par.length - 1; i++)
-                        printArg(par[i] + ": ", args[i + 2]);
-                }
-            }
-        },
+				// print args
+				if (name.indexOf(":") !== -1) {
+					console.log();
+					var par = name.split(":");
+					par[0] = par[0].split(" ")[1];
+					for (var i = 0; i < par.length - 1; i++)
+						printArg(par[i] + ": ", args[i + 2]);
+				}
+			}
+		},
 
-        onLeave: function(retval) {
+		onLeave: function(retval) {
 
-            if (this.flag) {
-                // print retval
-                printArg("\nretval: ", retval);
-                console.warn("\n*** exiting " + name);
-            }
-        }
+			if (this.flag) {
+				// print retval
+				printArg("\nretval: ", retval);
+				console.warn("\n*** exiting " + name);
+			}
+		}
 
-    });
+	});
 }
 
 // trace Module functions
 function traceModule(impl, name) {
-    console.log("Tracing " + name);
+	console.log("Tracing " + name);
 
-    Interceptor.attach(impl, {
+	Interceptor.attach(impl, {
 
-        onEnter: function(args) {
+		onEnter: function(args) {
 
-            // debug only the intended calls
-            this.flag = 0;
-            // var filename = Memory.readCString(ptr(args[0]));
-            // if (filename.indexOf("Bundle") === -1 && filename.indexOf("Cache") === -1) // exclusion list
-            // if (filename.indexOf("my.interesting.file") !== -1) // inclusion list
-            this.flag = 1;
+			// debug only the intended calls
+			this.flag = 0;
+			// var filename = Memory.readCString(ptr(args[0]));
+			// if (filename.indexOf("Bundle") === -1 && filename.indexOf("Cache") === -1) // exclusion list
+			// if (filename.indexOf("my.interesting.file") !== -1) // inclusion list
+			this.flag = 1;
 
-            if (this.flag) {
-                console.warn("\n[*] Entered " + name);
+			if (this.flag) {
+				console.warn("\n[*] Entered " + name);
 
-                console.warn("\n\targs " + args);
+				console.warn("\n\targs " + args);
 
-                // print backtrace
-                console.log("\n\tBacktrace:\n" + Thread.backtrace(this.context, Backtracer.ACCURATE)
-                    .map(DebugSymbol.fromAddress).join("\n"));
-            }
-        },
+				// print backtrace
+				console.log("\n\tBacktrace:\n" + Thread.backtrace(this.context, Backtracer.ACCURATE)
+					.map(DebugSymbol.fromAddress).join("\n"));
+			}
+		},
 
-        onLeave: function(retval) {
+		onLeave: function(retval) {
 
-            if (this.flag) {
-                // print retval
-                printArg("\n\tretval: ", retval);
-                console.warn("\n[*] Exiting " + name);
-            }
-        }
+			if (this.flag) {
+				// print retval
+				printArg("\n\tretval: ", retval);
+				console.warn("\n[*] Exiting " + name);
+			}
+		}
 
-    });
+	});
 }
 
 // print helper
 function printArg(desc, arg) {
-    try {
-        console.log(desc + ObjC.Object(arg));
-    } catch (err) {
-        console.log(desc + arg);
-    }
+	try {
+		console.log(desc + ObjC.Object(arg));
+	} catch (err) {
+		console.log(desc + arg);
+	}
 }
+
+function dumpKeychain(argument) {
+
+	var className = "Security";
+	var hookMethods = ["SecItemAdd", "SecItemUpdate", "SecItemDelete"];
+
+	for (var index = 0; index < hookMethods.length; index++) {
+		var methodName = hookMethods[index];
+		var ptr = null;
+		Module.enumerateExports(className, {
+			onMatch: function(imp) {
+				if (imp.type == "function" && imp.name == methodName) {
+					console.log("Found target method : " + methodName);
+
+					try {
+						Interceptor.attach(ptr(imp.address), {
+							onEnter: function(args) {
+								console.log("[+] Keychain operation: " + imp.name);
+								var params = ObjC.Object(args[0]); // CFDictionaryRef => NSDictionary
+								var keys = params.allKeys();
+								for (index = 0; index < keys.count(); index++) {
+									var k = keys.objectAtIndex_(index);
+									var v = params.objectForKey_(k);
+									if (k == "v_Data") {
+										var string = ObjC.classes.NSString.alloc();
+										v = string.initWithData_encoding_(v, 4).toString();
+									}
+									if (k == "pdmn") {
+										if (v == "ak") {
+											v = "kSecAttrAccessibleWhenUnlocked";
+										} else if (v == "ck") {
+											v = "kSecAttrAccessibleAfterFirstUnlock";
+										} else if (v == "dk") {
+											v = "kSecAttrAccessibleAlways";
+										} else if (v == "aku") {
+											v = "kSecAttrAccessibleWhenUnlockedThisDeviceOnly"
+										} else if (v == "cku") {
+											v = "kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly";
+										} else {
+											// v == dku
+											v = "kSecAttrAccessibleAlwaysThisDeviceOnly";
+										}
+									}
+									console.log("\t-   " + k + "=" + v);
+								}
+							}
+						});
+					} catch (error) {
+						console.log("Ignoring " + imp.name + ": " + error.message);
+					}
+				}
+			},
+			onComplete: function(e) {
+				console.log("All methods loaded");
+			}
+		});
+	}
+}
+
+// dumpKeychain();
 // UUTrace("+[UULoadManger delayHandleMethod]");
 // UUTrace("-[MBSSDK + login:completionHandler:]");
 // UUTrace("*[CredManager *]");
@@ -429,47 +569,3 @@ function printArg(desc, arg) {
 // UUTrace("exports:*!open*");
 // usage examples
 // UUTrace -End
-
-
-// UUObserveClass -Begin
-function UUObserveClass(name) {
-    var k = ObjC.classes[name];
-    k.$ownMethods.forEach(function(m) {
-        var impl = k[m].implementation;
-        console.log(colors.green, "\n[*] Started: Observing.... \n\t",colors.resetColor + name + ' ' + m);
-        Interceptor.attach(impl, {
-            onEnter: function(a) {
-                this.log = [];
-                this.log.push('(' + a[0] + ',' + Memory.readUtf8String(a[1]) + ') ' + name + ' ' + m);
-                if (m.indexOf(':') !== -1) {
-                    var params = m.split(':');
-                    params[0] = params[0].split(' ')[1];
-                    for (var i = 0; i < params.length - 1; i++) {
-                        try {
-                            this.log.push(params[i] + ': ' + new ObjC.Object(a[2 + i]).toString());
-                        } catch (e) {
-                            this.log.push(params[i] + ': ' + a[2 + i].toString());
-                        }
-                    }
-                }
-
-                this.log.push(
-                    Thread.backtrace(this.context, Backtracer.ACCURATE)
-                        .map(DebugSymbol.fromAddress)
-                        .join('\n')
-                );
-            },
-
-            onLeave: function(r) {
-                try {
-                    this.log.push('RET: ' + new ObjC.Object(r).toString());
-                } catch (e) {
-                    this.log.push('RET: ' + r.toString());
-                }
-
-                console.log(this.log.join('\n') + '\n');
-            }
-        });
-    });
-}
-// UUObserveClass -End
