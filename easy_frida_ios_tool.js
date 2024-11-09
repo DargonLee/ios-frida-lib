@@ -501,6 +501,88 @@ function printArg(desc, arg) {
 	}
 }
 
+function printObjc(argument) {
+    // 确保参数是 ObjC 对象
+    if (argument === null || argument === undefined) {
+        console.log("Argument is null or undefined");
+        return;
+    }
+
+    var obj = new ObjC.Object(argument);
+    
+    // 获取对象的类名
+    var className = obj.$className;
+    console.log("[*] Object Class:", className);
+
+    try {
+        switch(className) {
+            case "NSString":
+                console.log("[*] String Value:", obj.UTF8String());
+                break;
+                
+            case "NSData":
+                var strValue = obj.bytes().readUtf8String(obj.length());
+                console.log("[*] Data as String:", strValue);
+                // 如果想要查看十六进制
+                var hexString = "";
+                var bytes = new Uint8Array(Memory.readByteArray(obj.bytes(), obj.length()));
+                bytes.forEach(byte => hexString += ('0' + byte.toString(16)).slice(-2));
+                console.log("[*] Data as Hex:", hexString);
+                break;
+                
+            case "NSDictionary":
+                console.log("[*] Dictionary Content:");
+                var enumerator = obj.keyEnumerator();
+                var key;
+                while((key = enumerator.nextObject()) !== null) {
+                    var value = obj.objectForKey_(key);
+                    console.log(`   ${key} : ${value}`);
+                    // 递归打印嵌套对象
+                    if (value.$className === "NSDictionary" || 
+                        value.$className === "NSArray" ||
+                        value.$className === "NSData") {
+                        console.log("   Nested object:");
+                        printObjc(value);
+                    }
+                }
+                break;
+                
+            case "NSArray":
+                console.log("[*] Array Content:");
+                var count = obj.count().valueOf();
+                for (var i = 0; i < count; i++) {
+                    var element = obj.objectAtIndex_(i);
+                    console.log(`   [${i}] : ${element}`);
+                    // 递归打印嵌套对象
+                    if (element.$className === "NSDictionary" || 
+                        element.$className === "NSArray" ||
+                        element.$className === "NSData") {
+                        console.log("   Nested object:");
+                        printObjc(element);
+                    }
+                }
+                break;
+                
+            case "NSNumber":
+                console.log("[*] Number Value:", obj.doubleValue());
+                break;
+                
+            case "NSDate":
+                console.log("[*] Date Value:", obj.description());
+                break;
+                
+            default:
+                console.log("[*] Description:", obj.description());
+                // 尝试调用常见方法
+                if (obj.respondsToSelector_("UTF8String")) {
+                    console.log("[*] UTF8String:", obj.UTF8String());
+                }
+        }
+    } catch (error) {
+        console.log("[!] Error printing object:", error);
+    }
+}
+
 function dumpKeychain(argument) {
 
 	var className = "Security";
