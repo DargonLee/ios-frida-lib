@@ -143,6 +143,43 @@ function printObjc(argument) {
     }
 }
 
+// 加载动态库
+function loadFramework(frameworkPath) {
+    console.log("[+] Attempting to load framework:", frameworkPath);
+    
+    // Get handle to dlopen
+    const dlopen = new NativeFunction(
+        Module.findExportByName(null, "dlopen"),
+        'pointer',
+        ['pointer', 'int']
+    );
+    
+    // Convert framework path to native string
+    const path = Memory.allocUtf8String(frameworkPath);
+    
+    // RTLD_NOW = 2
+    // RTLD_GLOBAL = 8 
+    const RTLD_FLAGS = 2 | 8;  // Combined flags
+    
+    // Attempt to load the framework
+    const handle = dlopen(path, RTLD_FLAGS);
+    
+    if (handle.isNull()) {
+        // Get error message if loading failed
+        const dlerror = new NativeFunction(
+            Module.findExportByName(null, "dlerror"),
+            'pointer',
+            []
+        );
+        const errorMessage = Memory.readCString(dlerror());
+        throw new Error(`Failed to load framework: ${errorMessage}`);
+    }
+    
+    console.log("[+] Successfully loaded framework");
+    return handle;
+}
+
+
 function UUHelp() {
 	console.error("Usage: ")
 	console.log('    Example usage: UUIntercept("+[VssCtrlSDK configMBSLoginInfo:]")')
