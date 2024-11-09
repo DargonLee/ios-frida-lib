@@ -3,11 +3,144 @@
 	* frida -U -f cn.hzs.mbs -l easy_frida_ios_tool.js --no-pause
 	* frida -U -l frida.js --no-pause -f com.oeyes.moothook
 	*/
-var colors = {
-	"resetColor": "\x1b[0m",
-	"green": "\x1b[32m",
-	"yellow": "\x1b[33m",
-	"red": "\x1b[31m"
+// Console colors for better output formatting
+const COLORS = {
+    resetColor: "\x1b[0m",
+    green: "\x1b[32m",
+    yellow: "\x1b[33m",
+    red: "\x1b[31m",
+    blue: "\x1b[34m",
+    magenta: "\x1b[35m"
+};
+
+// Utility functions
+const Utils = {
+    // Enhanced error logging
+    logError: function(error, context = "") {
+        console.error(COLORS.red + "[ERROR] " + context, error, COLORS.resetColor);
+    },
+
+    // Enhanced success logging
+    logSuccess: function(message) {
+        console.log(COLORS.green + "[SUCCESS] " + message + COLORS.resetColor);
+    },
+
+    // Enhanced info logging
+    logInfo: function(message) {
+        console.log(COLORS.blue + "[INFO] " + message + COLORS.resetColor);
+    },
+
+    // Convert NSData to hex string
+    dataToHex: function(data) {
+        try {
+            const bytes = new Uint8Array(Memory.readByteArray(data.bytes(), data.length()));
+            return Array.from(bytes, byte => ('0' + byte.toString(16)).slice(-2)).join('');
+        } catch (error) {
+            this.logError(error, "DataToHex conversion failed");
+            return null;
+        }
+    }
+};
+
+// 优化后的 printObjc 函数，增加了更多的类型支持和错误处理
+function printObjc(argument) {
+    if (argument === null || argument === undefined) {
+        Utils.logError("Argument is null or undefined");
+        return;
+    }
+
+    try {
+        const obj = new ObjC.Object(argument);
+        const className = obj.$className;
+        Utils.logInfo(`Object Class: ${className}`);
+
+        const handlers = {
+            NSString: () => console.log("[*] String Value:", obj.UTF8String()),
+            
+            NSData: () => {
+                // Try UTF8 string conversion first
+                try {
+                    const strValue = obj.bytes().readUtf8String(obj.length());
+                    console.log("[*] Data as String:", strValue);
+                } catch (e) {
+                    console.log("[*] Data cannot be converted to UTF8 string");
+                }
+                // Always show hex representation
+                const hexString = Utils.dataToHex(obj);
+                console.log("[*] Data as Hex:", hexString);
+            },
+            
+            NSDictionary: () => {
+                console.log("[*] Dictionary Content:");
+                const processDict = (dict, depth = 0) => {
+                    const prefix = "  ".repeat(depth);
+                    const enumerator = dict.keyEnumerator();
+                    let key;
+                    while((key = enumerator.nextObject()) !== null) {
+                        const value = dict.objectForKey_(key);
+                        console.log(`${prefix}${key}: ${value}`);
+                        // Handle nested objects
+                        if (value.$className === "NSDictionary") {
+                            processDict(value, depth + 1);
+                        } else if (value.$className === "NSArray") {
+                            processArray(value, depth + 1);
+                        }
+                    }
+                };
+                processDict(obj);
+            },
+            
+            NSArray: () => {
+                console.log("[*] Array Content:");
+                const processArray = (array, depth = 0) => {
+                    const prefix = "  ".repeat(depth);
+                    const count = array.count().valueOf();
+                    for (let i = 0; i < count; i++) {
+                        const element = array.objectAtIndex_(i);
+                        console.log(`${prefix}[${i}]: ${element}`);
+                        // Handle nested objects
+                        if (element.$className === "NSDictionary") {
+                            processDict(element, depth + 1);
+                        } else if (element.$className === "NSArray") {
+                            processArray(element, depth + 1);
+                        }
+                    }
+                };
+                processArray(obj);
+            },
+            
+            NSNumber: () => {
+                console.log("[*] Number Value:", obj.doubleValue());
+                console.log("[*] Bool Value:", obj.boolValue());
+                console.log("[*] Integer Value:", obj.integerValue());
+            },
+            
+            NSDate: () => {
+                console.log("[*] Date Value:", obj.description());
+                console.log("[*] Timestamp:", obj.timeIntervalSince1970());
+            },
+            
+            NSURL: () => {
+                console.log("[*] URL String:", obj.absoluteString());
+                console.log("[*] Path:", obj.path());
+            }
+        };
+
+        if (handlers[className]) {
+            handlers[className]();
+        } else {
+            console.log("[*] Description:", obj.description());
+            // Try common methods
+            const commonMethods = ["UTF8String", "stringValue", "absoluteString", "path"];
+            commonMethods.forEach(method => {
+                if (obj.respondsToSelector_(method)) {
+                    console.log(`[*] ${method}:`, obj[method]());
+                }
+            });
+        }
+    } catch (error) {
+        Utils.logError(error, "PrintObjc failed");
+    }
 }
 
 function UUHelp() {
@@ -19,62 +152,73 @@ function UUHelp() {
 	console.log('    Example usage: UUTrace("+[UULoadManger delayHandleMethod]");')
 }
 
-// UUIntercept - Begin
-function _interceptPrintType(desc, arg) {
-	try {
-		console.log(desc + ObjC.Object(arg).$class + " " + ObjC.Object(arg).$className);
-	} catch (err) {
-		console.log(err)
-	}
-}
-
-function _interceptPrintValue(desc, arg) {
-	try {
-		console.log(desc + ObjC.Object(arg));
-	} catch (err) {
-		console.log(desc + arg);
-	}
-}
-
-function _interceptAuto(target) {
-	var className = target.match(/^[-+]\[(.*)\s/)[1];
-	var methodType = target.match(/^([-+])/)[1];
-	var methodName = target.match(/^[-+]\[.*\s(.*)\]/)[1];
-	var argCount = (methodName.match(/:/g) || []).length;
-	console.log(colors.green, "\n[*] Info: trying to intercept.... ", target, colors.resetColor);
-	var oldImpl = ObjC.classes[className][methodType + " " + methodName];
-	Interceptor.attach(oldImpl.implementation, {
-
-		onEnter: function(args) {
-			console.warn("\n[+]Entered ->", target);
-			for (var i = 0; i < argCount; i++) {
-				_interceptPrintType("[-] arg " + (i + 1) + " type:\t", args[i + 2]);
-				_interceptPrintValue("[-] arg " + (i + 1) + " value:\t", args[i + 2]);
-			}
-			console.log(colors.yellow, "\n[+]Backtrace.... ", target, colors.resetColor);
-			console.log(Thread.backtrace(this.context, Backtracer.ACCURATE).map(DebugSymbol.fromAddress).join("\n"));
-		},
-
-		onLeave: function(retval) {
-			console.warn("[+]Exiting ->", target);
-			_interceptPrintType("[-] retval type:\t", retval);
-			_interceptPrintValue("[-] retval value:\t", retval);
-
-		}
-
-	});
-}
+// 优化 UUIntercept 函数，增加更好的错误处理和日志输出
 /*
-	* Example usage:
-	* 打印函数调用的所有参数值和类型
-	* UUIntercept("+[VssCtrlSDK configMBSLoginInfo:]")
-	*/
-function UUIntercept(method) {
-	if (ObjC.available) {
-		_interceptAuto(method);
-	} else {
-		console.log("Not found: ", method);
-	}
+ * Example usage:
+ * 打印函数调用的所有参数值和类型
+ * UUIntercept("+[VssCtrlSDK configMBSLoginInfo:]")
+*/
+function UUIntercept(target) {
+    if (!ObjC.available) {
+        Utils.logError("Objective-C Runtime is not available");
+        return;
+    }
+
+    try {
+        const match = target.match(/^([-+])\[(.*?)\s+(.*?)\]$/);
+        if (!match) {
+            Utils.logError("Invalid method signature format");
+            return;
+        }
+
+        const [, methodType, className, methodName] = match;
+        const argCount = (methodName.match(/:/g) || []).length;
+
+        Utils.logInfo(`Intercepting ${target}`);
+        
+        const oldImpl = ObjC.classes[className][methodType + " " + methodName];
+        if (!oldImpl) {
+            Utils.logError(`Method ${methodName} not found in class ${className}`);
+            return;
+        }
+
+        Interceptor.attach(oldImpl.implementation, {
+            onEnter: function(args) {
+                Utils.logInfo(`Entered -> ${target}`);
+                
+                // 打印参数信息
+                for (let i = 0; i < argCount; i++) {
+                    const arg = args[i + 2];
+                    try {
+                        const objArg = new ObjC.Object(arg);
+                        console.log(`[-] arg ${i + 1}:`);
+                        printObjc(arg);
+                    } catch (error) {
+                        console.log(`[-] arg ${i + 1}: ${arg}`);
+                    }
+                }
+
+                // 打印调用栈
+                console.log(COLORS.yellow + "\n[+] Backtrace" + COLORS.resetColor);
+                console.log(Thread.backtrace(this.context, Backtracer.ACCURATE)
+                    .map(DebugSymbol.fromAddress).join("\n"));
+            },
+
+            onLeave: function(retval) {
+                Utils.logInfo(`Exiting -> ${target}`);
+                try {
+                    console.log("[-] Return value:");
+                    printObjc(retval);
+                } catch (error) {
+                    console.log("[-] Return value:", retval);
+                }
+            }
+        });
+
+        Utils.logSuccess(`Successfully intercepted ${target}`);
+    } catch (error) {
+        Utils.logError(error, `Failed to intercept ${target}`);
+    }
 }
 // UUIntercept - End
 
@@ -499,88 +643,6 @@ function printArg(desc, arg) {
 	} catch (err) {
 		console.log(desc + arg);
 	}
-}
-
-function printObjc(argument) {
-    // 确保参数是 ObjC 对象
-    if (argument === null || argument === undefined) {
-        console.log("Argument is null or undefined");
-        return;
-    }
-
-    var obj = new ObjC.Object(argument);
-    
-    // 获取对象的类名
-    var className = obj.$className;
-    console.log("[*] Object Class:", className);
-
-    try {
-        switch(className) {
-            case "NSString":
-                console.log("[*] String Value:", obj.UTF8String());
-                break;
-                
-            case "NSData":
-                var strValue = obj.bytes().readUtf8String(obj.length());
-                console.log("[*] Data as String:", strValue);
-                // 如果想要查看十六进制
-                var hexString = "";
-                var bytes = new Uint8Array(Memory.readByteArray(obj.bytes(), obj.length()));
-                bytes.forEach(byte => hexString += ('0' + byte.toString(16)).slice(-2));
-                console.log("[*] Data as Hex:", hexString);
-                break;
-                
-            case "NSDictionary":
-                console.log("[*] Dictionary Content:");
-                var enumerator = obj.keyEnumerator();
-                var key;
-                while((key = enumerator.nextObject()) !== null) {
-                    var value = obj.objectForKey_(key);
-                    console.log(`   ${key} : ${value}`);
-                    // 递归打印嵌套对象
-                    if (value.$className === "NSDictionary" || 
-                        value.$className === "NSArray" ||
-                        value.$className === "NSData") {
-                        console.log("   Nested object:");
-                        printObjc(value);
-                    }
-                }
-                break;
-                
-            case "NSArray":
-                console.log("[*] Array Content:");
-                var count = obj.count().valueOf();
-                for (var i = 0; i < count; i++) {
-                    var element = obj.objectAtIndex_(i);
-                    console.log(`   [${i}] : ${element}`);
-                    // 递归打印嵌套对象
-                    if (element.$className === "NSDictionary" || 
-                        element.$className === "NSArray" ||
-                        element.$className === "NSData") {
-                        console.log("   Nested object:");
-                        printObjc(element);
-                    }
-                }
-                break;
-                
-            case "NSNumber":
-                console.log("[*] Number Value:", obj.doubleValue());
-                break;
-                
-            case "NSDate":
-                console.log("[*] Date Value:", obj.description());
-                break;
-                
-            default:
-                console.log("[*] Description:", obj.description());
-                // 尝试调用常见方法
-                if (obj.respondsToSelector_("UTF8String")) {
-                    console.log("[*] UTF8String:", obj.UTF8String());
-                }
-        }
-    } catch (error) {
-        console.log("[!] Error printing object:", error);
-    }
 }
 
 function dumpKeychain(argument) {
